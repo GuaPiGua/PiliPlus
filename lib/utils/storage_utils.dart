@@ -17,14 +17,14 @@ abstract final class StorageUtils {
         allowedExtensions: allowedExtensions,
         type: type,
         fileName: name,
-        bytes: PlatformUtils.isDesktop ? null : bytes,
+        bytes: PlatformUtils.isDesktop ? Uint8List(0) : bytes,
       );
       if (path == null) {
         SmartDialog.showToast("取消保存");
         return;
       }
       if (PlatformUtils.isDesktop) {
-        await File(path).writeAsBytes(bytes);
+        await File(path.toFilePath()).writeAsBytes(bytes);
       }
       SmartDialog.showToast("已保存");
     } catch (e) {

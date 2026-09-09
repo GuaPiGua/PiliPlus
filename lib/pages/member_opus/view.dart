@@ -1,15 +1,18 @@
 import 'package:PiliPlus/common/skeleton/space_opus.dart';
+import 'package:PiliPlus/common/sliver_single_child_delegate.dart';
 import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/flutter/refresh_indicator.dart';
 import 'package:PiliPlus/common/widgets/loading_widget/http_error.dart';
+import 'package:PiliPlus/common/widgets/scaffold/simple_scaffold.dart';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/models_new/space/space_opus/item.dart';
+import 'package:PiliPlus/pages/common/fab_mixin.dart';
 import 'package:PiliPlus/pages/member_opus/controller.dart';
 import 'package:PiliPlus/pages/member_opus/widgets/space_opus_item.dart';
 import 'package:PiliPlus/utils/grid.dart';
 import 'package:PiliPlus/utils/waterfall.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:waterfall_flow/waterfall_flow.dart'
     hide SliverWaterfallFlowDelegateWithMaxCrossAxisExtent;
 
@@ -30,7 +33,11 @@ class MemberOpus extends StatefulWidget {
 }
 
 class _MemberOpusState extends State<MemberOpus>
-    with AutomaticKeepAliveClientMixin {
+    with
+        AutomaticKeepAliveClientMixin,
+        SingleTickerProviderStateMixin,
+        BaseFabMixin,
+        LazyFabMixin {
   late final MemberOpusController _controller;
 
   @override
@@ -49,10 +56,10 @@ class _MemberOpusState extends State<MemberOpus>
   Widget build(BuildContext context) {
     super.build(context);
     final bottom = MediaQuery.viewPaddingOf(context).bottom;
-    return Stack(
-      children: [
-        refreshIndicator(
-          onRefresh: _controller.onRefresh,
+    return ScaffoldLayout(
+      body: refreshIndicator(
+        onRefresh: _controller.onRefresh,
+        child: fabAnimWrapper(
           child: CustomScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             slivers: [
@@ -68,56 +75,59 @@ class _MemberOpusState extends State<MemberOpus>
             ],
           ),
         ),
-        if (_controller.filter?.isNotEmpty == true)
-          Positioned(
-            right: kFloatingActionButtonMargin,
-            bottom: bottom + kFloatingActionButtonMargin,
-            child: FloatingActionButton.extended(
-              onPressed: () => showDialog(
-                context: context,
-                builder: (context) => AlertDialog(
-                  clipBehavior: Clip.hardEdge,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                  content: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: _controller.filter!
-                        .map(
-                          (e) => ListTile(
-                            onTap: () {
-                              if (e == _controller.type.value) {
-                                return;
-                              }
-                              Get.back();
-                              _controller
-                                ..type.value = e
-                                ..onReload();
-                            },
-                            tileColor: e == _controller.type.value
-                                ? Theme.of(
-                                    context,
-                                  ).colorScheme.onInverseSurface
-                                : null,
-                            dense: true,
-                            title: Text(
-                              e.text ?? e.tabName!,
-                              style: const TextStyle(fontSize: 14),
+      ),
+      fab: _controller.filter?.isNotEmpty == true
+          ? SlideTransition(
+              position: fabAnimation,
+              child: Padding(
+                padding: .only(
+                  right: kFloatingActionButtonMargin,
+                  bottom: kFloatingActionButtonMargin + bottom,
+                ),
+                child: FloatingActionButton.extended(
+                  onPressed: () => showDialog(
+                    context: context,
+                    builder: (context) => SimpleDialog(
+                      clipBehavior: Clip.hardEdge,
+                      contentPadding: const EdgeInsets.symmetric(
+                        vertical: 12,
+                      ),
+                      children: _controller.filter!
+                          .map(
+                            (e) => ListTile(
+                              dense: true,
+                              onTap: () {
+                                if (e == _controller.type.value) {
+                                  return;
+                                }
+                                Get.back();
+                                _controller
+                                  ..type.value = e
+                                  ..onReload();
+                              },
+                              tileColor: e == _controller.type.value
+                                  ? ColorScheme.of(context).onInverseSurface
+                                  : null,
+                              title: Text(
+                                e.text ?? e.tabName!,
+                                style: const TextStyle(fontSize: 14),
+                              ),
                             ),
-                          ),
-                        )
-                        .toList(),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                  icon: const Icon(size: 20, Icons.sort),
+                  label: Obx(
+                    () {
+                      final type = _controller.type.value;
+                      return Text(type.text ?? type.tabName!);
+                    },
                   ),
                 ),
               ),
-              icon: const Icon(size: 20, Icons.sort),
-              label: Obx(
-                () {
-                  final type = _controller.type.value;
-                  return Text(type.text ?? type.tabName!);
-                },
-              ),
-            ),
-          ),
-      ],
+            )
+          : null,
     );
   }
 
@@ -131,9 +141,9 @@ class _MemberOpusState extends State<MemberOpus>
     return switch (loadingState) {
       Loading() => SliverWaterfallFlow(
         gridDelegate: gridDelegate,
-        delegate: SliverChildBuilderDelegate(
-          (context, index) => const SpaceOpusSkeleton(),
-          childCount: 10,
+        delegate: const SliverSingleChildDelegate(
+          count: 10,
+          child: SpaceOpusSkeleton(),
         ),
       ),
       Success(:final response) =>

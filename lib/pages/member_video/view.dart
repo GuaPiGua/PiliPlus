@@ -1,20 +1,22 @@
 import 'package:PiliPlus/common/style.dart';
 import 'package:PiliPlus/common/widgets/flutter/refresh_indicator.dart';
 import 'package:PiliPlus/common/widgets/loading_widget/http_error.dart';
-import 'package:PiliPlus/common/widgets/scroll_physics.dart';
+import 'package:PiliPlus/common/widgets/scaffold/simple_scaffold.dart';
+import 'package:PiliPlus/common/widgets/scroll_physics.dart'
+    show ReloadScrollPhysics;
 import 'package:PiliPlus/common/widgets/sliver/sliver_floating_header.dart';
 import 'package:PiliPlus/http/loading_state.dart';
 import 'package:PiliPlus/models/common/member/contribute_type.dart';
 import 'package:PiliPlus/models_new/space/space_archive/item.dart';
+import 'package:PiliPlus/pages/common/fab_mixin.dart';
 import 'package:PiliPlus/pages/member/controller.dart';
 import 'package:PiliPlus/pages/member_video/controller.dart';
 import 'package:PiliPlus/pages/member_video/widgets/video_card_h_member_video.dart';
 import 'package:PiliPlus/utils/grid.dart';
-import 'package:extended_nested_scroll_view/extended_nested_scroll_view.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
-import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:get/get.dart';
+import 'package:material_ui/material_ui.dart';
 
 class MemberVideo extends StatefulWidget {
   const MemberVideo({
@@ -41,25 +43,29 @@ class MemberVideo extends StatefulWidget {
 }
 
 class _MemberVideoState extends State<MemberVideo>
-    with AutomaticKeepAliveClientMixin, GridMixin {
+    with
+        AutomaticKeepAliveClientMixin,
+        GridMixin,
+        SingleTickerProviderStateMixin,
+        BaseFabMixin,
+        LazyFabMixin {
   @override
   bool get wantKeepAlive => true;
 
   late final MemberVideoCtr _controller;
-
-  int? _index;
-  late ExtendedNestedScrollController _scrollController;
 
   void _jumpToIndex(int index) {
     final scrollOffset = gridDelegate.layoutCache!
         .getGeometryForChildIndex(index)
         .scrollOffset;
     try {
-      _scrollController.nestedPositions
-          .elementAt(_index!)
-          .localJumpTo(scrollOffset);
+      final state = Get.find<MemberController>(
+        tag: widget.heroTag,
+      ).scrollKey.currentState;
+      if (state != null && state.mounted) {
+        state.innerNestedPositions.first.localJumpTo(scrollOffset);
+      }
     } catch (e) {
-      _scrollController.jumpTo(scrollOffset);
       if (kDebugMode) debugPrint('jump error: $e');
     }
   }
@@ -112,28 +118,26 @@ class _MemberVideoState extends State<MemberVideo>
       ),
     );
     if (_controller.isVideo && _controller.fromViewAid?.isNotEmpty == true) {
-      if (_index == null) {
-        _scrollController =
-            PrimaryScrollController.of(this.context)
-                as ExtendedNestedScrollController;
-        _index = _scrollController.nestedPositions.length;
-      }
-      return Stack(
-        clipBehavior: Clip.none,
-        children: [
-          child,
-          Obx(
-            () => !_controller.isLocating.value
-                ? Positioned(
-                    right: kFloatingActionButtonMargin,
-                    bottom: kFloatingActionButtonMargin + padding.bottom,
+      return ScaffoldLayout(
+        body: fabAnimWrapper(child: child),
+        fab: Obx(
+          () => !_controller.isLocating.value
+              ? SlideTransition(
+                  position: fabAnimation,
+                  child: Padding(
+                    padding: .only(
+                      right: kFloatingActionButtonMargin,
+                      bottom: kFloatingActionButtonMargin + padding.bottom,
+                    ),
                     child: FloatingActionButton.extended(
                       onPressed: () {
                         final fromViewAid = _controller.fromViewAid;
                         _controller.isLocating.value = true;
                         final locatedIndex =
                             _controller.loadingState.value.dataOrNull
-                                ?.indexWhere((i) => i.param == fromViewAid) ??
+                                ?.indexWhere(
+                                  (i) => i.param == fromViewAid,
+                                ) ??
                             -1;
                         if (locatedIndex == -1) {
                           _controller
@@ -148,10 +152,10 @@ class _MemberVideoState extends State<MemberVideo>
                       },
                       label: const Text('定位至上次观看'),
                     ),
-                  )
-                : const SizedBox.shrink(),
-          ),
-        ],
+                  ),
+                )
+              : const SizedBox.shrink(),
+        ),
       );
     }
     return child;

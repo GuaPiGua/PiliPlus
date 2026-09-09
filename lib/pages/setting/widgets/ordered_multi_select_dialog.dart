@@ -1,7 +1,7 @@
 import 'package:PiliPlus/pages/setting/widgets/checkbox_num_list_tile.dart';
 import 'package:collection/collection.dart';
-import 'package:flutter/material.dart';
 import 'package:get/get.dart';
+import 'package:material_ui/material_ui.dart';
 
 class OrderedMultiSelectDialog<T> extends StatefulWidget {
   final Iterable<T> initValues;
@@ -88,7 +88,7 @@ class _OrderedMultiSelectDialogState<T>
         ),
         TextButton(
           onPressed: () {
-            assert(_tempValues.values.isSorted((a, b) => a.compareTo(b)));
+            assert(_tempValues.values.isSorted(Comparable.compare));
             Get.back(result: _tempValues.keys.toList());
           },
           child: const Text('确定'),

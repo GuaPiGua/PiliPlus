@@ -1,8 +1,10 @@
-import 'dart:io';
+import 'dart:io' show Platform;
 import 'dart:math' show max;
 
 import 'package:PiliPlus/common/widgets/custom_icon.dart';
-import 'package:PiliPlus/common/widgets/flutter/refresh_indicator.dart';
+import 'package:PiliPlus/common/widgets/dialog/simple_dialog_option.dart';
+import 'package:PiliPlus/common/widgets/flutter/refresh_indicator.dart'
+    show RefreshIndicator, displacement, refreshDragExtent;
 import 'package:PiliPlus/common/widgets/gesture/horizontal_drag_gesture_recognizer.dart'
     show deviceTouchSlop, touchSlopH;
 import 'package:PiliPlus/common/widgets/image_grid/image_grid_view.dart'
@@ -26,12 +28,13 @@ import 'package:PiliPlus/pages/setting/models/model.dart';
 import 'package:PiliPlus/pages/setting/widgets/select_dialog.dart';
 import 'package:PiliPlus/pages/setting/widgets/slider_dialog.dart';
 import 'package:PiliPlus/pages/video/reply/widgets/reply_item_grpc.dart';
-import 'package:PiliPlus/plugin/pl_player/controller.dart';
 import 'package:PiliPlus/services/download/download_service.dart';
 import 'package:PiliPlus/utils/accounts.dart';
+import 'package:PiliPlus/utils/android/bindings.g.dart';
 import 'package:PiliPlus/utils/cache_manager.dart';
 import 'package:PiliPlus/utils/extension/num_ext.dart';
 import 'package:PiliPlus/utils/feed_back.dart';
+import 'package:PiliPlus/utils/filtering_text.dart';
 import 'package:PiliPlus/utils/global_data.dart';
 import 'package:PiliPlus/utils/image_utils.dart';
 import 'package:PiliPlus/utils/path_utils.dart';
@@ -43,12 +46,12 @@ import 'package:PiliPlus/utils/update.dart';
 import 'package:PiliPlus/utils/utils.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kDebugMode;
-import 'package:flutter/material.dart' hide RefreshIndicator;
-import 'package:flutter/services.dart';
+import 'package:flutter/services.dart' show FilteringTextInputFormatter;
 import 'package:flutter_smart_dialog/flutter_smart_dialog.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:get/get.dart';
 import 'package:material_design_icons_flutter/material_design_icons_flutter.dart';
+import 'package:material_ui/material_ui.dart' hide RefreshIndicator;
 
 List<SettingsModel> get extraSettings => [
   if (PlatformUtils.isDesktop) ...[
@@ -69,7 +72,15 @@ List<SettingsModel> get extraSettings => [
       leading: const Icon(Icons.storage),
       onTap: _showDownPathDialog,
     ),
-  ],
+  ] else if (Platform.isAndroid)
+    SwitchModel(
+      title: '允许三方APP访问私有存储',
+      subtitle: '允许三方APP（例如MT管理器）通过访问外部存储的方式访问私有存储下的文件',
+      leading: const Icon(Icons.storage),
+      setKey: SettingBoxKey.enableDocProvider,
+      defaultVal: Pref.enableDocProvider,
+      onChanged: AndroidHelper.updateDocProvider,
+    ),
   SplitModel(
     normalModel: const NormalModel.split(
       title: '空降助手',
@@ -241,15 +252,10 @@ List<SettingsModel> get extraSettings => [
     leading: const Icon(Icons.pan_tool_alt_outlined),
   ),
   NormalModel(
-    title: '刷新滑动距离',
-    leading: const Icon(Icons.refresh),
-    getSubtitle: () => '当前滑动距离: ${Pref.refreshDragPercentage}x',
-    onTap: _showRefreshDragDialog,
-  ),
-  NormalModel(
     title: '刷新指示器高度',
     leading: const Icon(Icons.height),
-    getSubtitle: () => '当前指示器高度: ${Pref.refreshDisplacement}',
+    getSubtitle: () =>
+        '当前指示器高度: ${Pref.refreshDisplacement}, 刷新滑动距离: $refreshDragExtent',
     onTap: _showRefreshDialog,
   ),
   const SwitchModel(
@@ -549,17 +555,32 @@ List<SettingsModel> get extraSettings => [
     leading: Icon(Icons.more_time_outlined),
     onTap: _showReplyDelayDialog,
   ),
-  NormalModel(
+  PopupModel(
     title: '评论展示',
     leading: const Icon(Icons.whatshot_outlined),
-    getSubtitle: () => '当前优先展示「${Pref.replySortType.title}」',
-    onTap: _showReplySortDialog,
+    value: () => Pref.replySortType,
+    items: ReplySortType.values.take(2),
+    onSelected: (value, setState) => GStorage.setting
+        .put(SettingBoxKey.replySortType, value.index)
+        .whenComplete(setState),
   ),
-  NormalModel(
+  PopupModel(
+    title: '楼中楼评论展示',
+    leading: const Icon(Icons.subdirectory_arrow_right_outlined),
+    value: () => Pref.reply2SortType,
+    items: ReplySortType.values.take(2),
+    onSelected: (value, setState) => GStorage.setting
+        .put(SettingBoxKey.reply2SortType, value.index)
+        .whenComplete(setState),
+  ),
+  PopupModel(
     title: '动态展示',
     leading: const Icon(Icons.dynamic_feed_rounded),
-    getSubtitle: () => '当前优先展示「${Pref.defaultDynamicType.label}」',
-    onTap: _showDefDynDialog,
+    value: () => Pref.defaultDynamicType,
+    items: DynamicsTabType.values.take(4),
+    onSelected: (value, setState) => GStorage.setting
+        .put(SettingBoxKey.defaultDynamicType, value.index)
+        .whenComplete(setState),
   ),
   SwitchModel(
     title: '显示动态互动内容',
@@ -594,19 +615,10 @@ List<SettingsModel> get extraSettings => [
       onTap: _showProxyDialog,
     ),
   ),
-  const SwitchModel(
-    title: '自动清除缓存',
-    subtitle: '每次启动时清除缓存',
-    leading: Icon(Icons.auto_delete_outlined),
-    setKey: SettingBoxKey.autoClearCache,
-    defaultVal: false,
-  ),
   NormalModel(
     title: '最大缓存大小',
-    getSubtitle: () {
-      final num = Pref.maxCacheSize;
-      return '当前最大缓存大小: 「${num == 0 ? '无限' : CacheManager.formatSize(Pref.maxCacheSize)}」';
-    },
+    getSubtitle: () =>
+        '当前最大缓存大小: 「${CacheManager.formatSize(Pref.maxCacheSize)}」',
     leading: const Icon(Icons.delete_outlined),
     onTap: _showCacheDialog,
   ),
@@ -697,7 +709,7 @@ Future<void> audioNormalization(
                 Get.back();
                 GStorage.setting.put(key, param);
                 if (!fallback &&
-                    PlPlayerController.loudnormRegExp.hasMatch(param)) {
+                    AudioNormalization.loudnormRegExp.hasMatch(param)) {
                   audioNormalization(context, setState, fallback: true);
                 }
                 setState();
@@ -720,48 +732,42 @@ Future<void> audioNormalization(
 void _showDownPathDialog(BuildContext context, VoidCallback setState) {
   showDialog(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (context) => SimpleDialog(
       clipBehavior: Clip.hardEdge,
       contentPadding: const EdgeInsets.symmetric(vertical: 12),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            onTap: () {
-              Get.back();
-              Utils.copyText(downloadPath);
-            },
-            dense: true,
-            title: const Text('复制', style: TextStyle(fontSize: 14)),
-          ),
-          ListTile(
-            onTap: () {
-              Get.back();
-              final defPath = defDownloadPath;
-              if (downloadPath == defPath) return;
-              downloadPath = defPath;
-              setState();
-              Get.find<DownloadService>().initDownloadList();
-              GStorage.setting.delete(SettingBoxKey.downloadPath);
-            },
-            dense: true,
-            title: const Text('重置', style: TextStyle(fontSize: 14)),
-          ),
-          ListTile(
-            onTap: () async {
-              Get.back();
-              final path = await FilePicker.getDirectoryPath();
-              if (path == null || path == downloadPath) return;
-              downloadPath = path;
-              setState();
-              Get.find<DownloadService>().initDownloadList();
-              GStorage.setting.put(SettingBoxKey.downloadPath, path);
-            },
-            dense: true,
-            title: const Text('设置新路径', style: TextStyle(fontSize: 14)),
-          ),
-        ],
-      ),
+      children: [
+        DialogOption(
+          onPressed: () {
+            Get.back();
+            Utils.copyText(downloadPath);
+          },
+          child: const Text('复制', style: TextStyle(fontSize: 14)),
+        ),
+        DialogOption(
+          onPressed: () {
+            Get.back();
+            final defPath = defDownloadPath;
+            if (downloadPath == defPath) return;
+            downloadPath = defPath;
+            setState();
+            Get.find<DownloadService>().initDownloadList();
+            GStorage.setting.delete(SettingBoxKey.downloadPath);
+          },
+          child: const Text('重置', style: TextStyle(fontSize: 14)),
+        ),
+        DialogOption(
+          onPressed: () async {
+            Get.back();
+            final path = await FilePicker.getDirectoryPath();
+            if (path == null || path == downloadPath) return;
+            downloadPath = path;
+            setState();
+            Get.find<DownloadService>().initDownloadList();
+            GStorage.setting.put(SettingBoxKey.downloadPath, path);
+          },
+          child: const Text('设置新路径', style: TextStyle(fontSize: 14)),
+        ),
+      ],
     ),
   );
 }
@@ -858,9 +864,7 @@ void _showDmHeightDialog(BuildContext context, VoidCallback setState) {
         initialValue: danmakuLineHeight,
         keyboardType: const .numberWithOptions(decimal: true),
         onChanged: (value) => danmakuLineHeight = value,
-        inputFormatters: [
-          FilteringTextInputFormatter.allow(RegExp(r'[\d\.]+')),
-        ],
+        inputFormatters: FilteringText.decimal,
       ),
       actions: [
         TextButton(
@@ -902,9 +906,7 @@ void _showTouchSlopDialog(BuildContext context, VoidCallback setState) {
         initialValue: initialValue,
         keyboardType: const .numberWithOptions(decimal: true),
         onChanged: (value) => initialValue = value,
-        inputFormatters: [
-          FilteringTextInputFormatter.allow(RegExp(r'[\d\.]+')),
-        ],
+        inputFormatters: FilteringText.decimal,
       ),
       actions: [
         TextButton(
@@ -933,29 +935,6 @@ void _showTouchSlopDialog(BuildContext context, VoidCallback setState) {
   );
 }
 
-Future<void> _showRefreshDragDialog(
-  BuildContext context,
-  VoidCallback setState,
-) async {
-  final res = await showDialog<double>(
-    context: context,
-    builder: (context) => SliderDialog(
-      title: '刷新滑动距离',
-      min: 0.1,
-      max: 0.5,
-      divisions: 8,
-      precise: 2,
-      value: Pref.refreshDragPercentage,
-      suffix: 'x',
-    ),
-  );
-  if (res != null) {
-    kDragContainerExtentPercentage = res;
-    await GStorage.setting.put(SettingBoxKey.refreshDragPercentage, res);
-    setState();
-  }
-}
-
 Future<void> _showRefreshDialog(
   BuildContext context,
   VoidCallback setState,
@@ -963,7 +942,7 @@ Future<void> _showRefreshDialog(
   final res = await showDialog<double>(
     context: context,
     builder: (context) => SliderDialog(
-      title: '刷新指示器高度',
+      title: const Text('刷新指示器高度'),
       min: 10.0,
       max: 100.0,
       divisions: 9,
@@ -1063,7 +1042,7 @@ Future<void> _showReplyCountDialog(
   final res = await showDialog<double>(
     context: context,
     builder: (context) => SliderDialog(
-      title: '连接重试次数',
+      title: const Text('连接重试次数'),
       min: 0,
       max: 8,
       divisions: 8,
@@ -1085,7 +1064,7 @@ Future<void> _showReplyDelayDialog(
   final res = await showDialog<double>(
     context: context,
     builder: (context) => SliderDialog(
-      title: '连接重试间隔',
+      title: const Text('连接重试间隔'),
       min: 0,
       max: 1000,
       divisions: 10,
@@ -1098,45 +1077,6 @@ Future<void> _showReplyDelayDialog(
     await GStorage.setting.put(SettingBoxKey.retryDelay, res.toInt());
     setState();
     SmartDialog.showToast('重启生效');
-  }
-}
-
-Future<void> _showReplySortDialog(
-  BuildContext context,
-  VoidCallback setState,
-) async {
-  final res = await showDialog<ReplySortType>(
-    context: context,
-    builder: (context) => SelectDialog<ReplySortType>(
-      title: '评论展示',
-      value: Pref.replySortType,
-      values: ReplySortType.values.take(2).map((e) => (e, e.title)).toList(),
-    ),
-  );
-  if (res != null) {
-    await GStorage.setting.put(SettingBoxKey.replySortType, res.index);
-    setState();
-  }
-}
-
-Future<void> _showDefDynDialog(
-  BuildContext context,
-  VoidCallback setState,
-) async {
-  final res = await showDialog<DynamicsTabType>(
-    context: context,
-    builder: (context) => SelectDialog<DynamicsTabType>(
-      title: '动态展示',
-      value: Pref.defaultDynamicType,
-      values: DynamicsTabType.values.take(4).map((e) => (e, e.label)).toList(),
-    ),
-  );
-  if (res != null) {
-    await GStorage.setting.put(
-      SettingBoxKey.defaultDynamicType,
-      res.index,
-    );
-    setState();
   }
 }
 
@@ -1188,9 +1128,7 @@ void _showProxyDialog(BuildContext context) {
             decoration: const InputDecoration(
               isDense: true,
               labelText: '请输入Port',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.all(Radius.circular(6)),
-              ),
+              border: OutlineInputBorder(borderRadius: .all(.circular(6))),
             ),
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             onChanged: (e) => systemProxyPort = e,
@@ -1234,9 +1172,7 @@ void _showCacheDialog(BuildContext context, VoidCallback setState) {
         autofocus: true,
         onChanged: (value) => valueStr = value,
         keyboardType: TextInputType.number,
-        inputFormatters: [
-          FilteringTextInputFormatter.allow(RegExp(r'[\d\.]+')),
-        ],
+        inputFormatters: FilteringText.decimal,
         decoration: const InputDecoration(suffixText: 'MB'),
       ),
       actions: [

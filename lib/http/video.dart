@@ -23,7 +23,6 @@ import 'package:PiliPlus/models_new/triple/pgc_triple.dart';
 import 'package:PiliPlus/models_new/triple/ugc_triple.dart';
 import 'package:PiliPlus/models_new/video/video_ai_conclusion/data.dart';
 import 'package:PiliPlus/models_new/video/video_detail/data.dart';
-import 'package:PiliPlus/models_new/video/video_detail/video_detail_response.dart';
 import 'package:PiliPlus/models_new/video/video_note_list/data.dart';
 import 'package:PiliPlus/models_new/video/video_play_info/data.dart';
 import 'package:PiliPlus/models_new/video/video_relation/data.dart';
@@ -37,6 +36,7 @@ import 'package:PiliPlus/utils/recommend_filter.dart';
 import 'package:PiliPlus/utils/request_utils.dart';
 import 'package:PiliPlus/utils/storage.dart';
 import 'package:PiliPlus/utils/storage_pref.dart';
+import 'package:PiliPlus/utils/subtitle_utils.dart';
 import 'package:PiliPlus/utils/utils.dart';
 import 'package:PiliPlus/utils/wbi_sign.dart';
 import 'package:dio/dio.dart';
@@ -123,10 +123,8 @@ abstract final class VideoHttp {
       options: Options(
         headers: {
           'buvid': LoginHttp.buvid,
-          'fp_local':
-              '1111111111111111111111111111111111111111111111111111111111111111',
-          'fp_remote':
-              '1111111111111111111111111111111111111111111111111111111111111111',
+          'fp_local': '1111111111111111111111111111111111111111111111111111111111111111',
+          'fp_remote': '1111111111111111111111111111111111111111111111111111111111111111',
           'session_id': '11111111',
           'env': 'prod',
           'app-key': 'android_hd',
@@ -139,12 +137,13 @@ abstract final class VideoHttp {
       ),
     );
     if (res.data['code'] == 0) {
-      List<RcmdVideoItemAppModel> list = <RcmdVideoItemAppModel>[];
+      final list = <RcmdVideoItemAppModel>[];
       for (final i in res.data['data']['items']) {
         // 屏蔽推广和拉黑用户
         if (i['card_goto'] != 'ad_av' &&
             i['card_goto'] != 'ad_web_s' &&
             i['ad_info'] == null &&
+            i['can_play'] == 1 &&
             (i['args'] != null &&
                 !GlobalData().blackMids.contains(i['args']['up_id']))) {
           if (enableFilter &&
@@ -202,7 +201,7 @@ abstract final class VideoHttp {
     int? avid,
     String? bvid,
     required int cid,
-    int? qn,
+    required int qn,
     dynamic epid,
     dynamic seasonId,
     required bool tryLook,
@@ -218,7 +217,7 @@ abstract final class VideoHttp {
       'ep_id': ?epid,
       'season_id': ?seasonId,
       'cid': cid,
-      'qn': qn ?? 80,
+      'qn': qn,
       // 获取所有格式的视频
       'fnval': 4048,
       'fourk': 1,
@@ -242,25 +241,24 @@ abstract final class VideoHttp {
       if (res.data['code'] == 0) {
         late PlayUrlModel data;
         switch (videoType) {
-          case VideoType.ugc:
+          case .ugc:
             data = PlayUrlModel.fromJson(res.data['data']);
-            break;
-          case VideoType.pugv:
-            final result = res.data['data'];
-            data = PlayUrlModel.fromJson(result)
-              ..lastPlayTime =
-                  result?['play_view_business_info']?['user_status']?['watch_progress']?['current_watch_progress'];
-            break;
-          case VideoType.pgc:
+
+          case .pgc:
             final result = res.data['result'];
             data = PlayUrlModel.fromJson(result['video_info'])
               ..lastPlayTime =
-                  result?['play_view_business_info']?['user_status']?['watch_progress']?['current_watch_progress'];
-            break;
+                  result['play_view_business_info']?['user_status']?['watch_progress']?['current_watch_progress'];
+
+          case .pugv:
+            final result = res.data['data'];
+            data = PlayUrlModel.fromJson(result)
+              ..lastPlayTime =
+                  result['play_view_business_info']?['user_status']?['watch_progress']?['current_watch_progress'];
         }
         return Success(data);
-      } else if (epid != null && videoType == VideoType.ugc) {
-        return videoUrl(
+      } else if (epid != null && videoType == .ugc) {
+        return await videoUrl(
           avid: avid,
           bvid: bvid,
           cid: cid,
@@ -268,7 +266,7 @@ abstract final class VideoHttp {
           epid: epid,
           seasonId: seasonId,
           tryLook: tryLook,
-          videoType: VideoType.pgc,
+          videoType: .pgc,
         );
       }
       return Error(_parseVideoErr(res.data['code'], res.data['message']));
@@ -291,13 +289,12 @@ abstract final class VideoHttp {
   }) async {
     final res = await Request().get(
       Api.videoIntro,
-      queryParameters: {'bvid': bvid},
+      queryParameters: await WbiSign.makSign({'bvid': bvid}),
     );
-    VideoDetailResponse data = VideoDetailResponse.fromJson(res.data);
-    if (data.code == 0) {
-      return Success(data.data!);
+    if (res.data['code'] == 0) {
+      return Success(VideoDetailData.fromJson(res.data['data']));
     } else {
-      return Error(data.message);
+      return Error(res.data['message']);
     }
   }
 
@@ -835,33 +832,20 @@ abstract final class VideoHttp {
     }
   }
 
-  static String _subtitleTimecode(num seconds) {
-    int h = seconds ~/ 3600;
-    seconds %= 3600;
-    int m = seconds ~/ 60;
-    seconds %= 60;
-    String sms = seconds.toStringAsFixed(3).padLeft(6, '0');
-    return h == 0
-        ? "${m.toString().padLeft(2, '0')}:$sms"
-        : "${h.toString().padLeft(2, '0')}:${m.toString().padLeft(2, '0')}:$sms";
-  }
-
-  static String processList(List list) {
-    final sb = StringBuffer('WEBVTT\n\n')
-      ..writeAll(
-        list.map(
-          (item) =>
-              '${item?['sid'] ?? 0}\n${_subtitleTimecode(item['from'])} --> ${_subtitleTimecode(item['to'])}\n${item['content'].trim()}',
-        ),
-        '\n\n',
-      );
-    return sb.toString();
-  }
-
-  static Future<String?> vttSubtitles(String subtitleUrl) async {
+  static Future<String?> getSubtitles(
+    String subtitleUrl, {
+    SubtitleFormat format = .vtt,
+  }) async {
     final res = await Request().get("https:$subtitleUrl");
     if (res.data?['body'] case List list) {
-      return compute<List, String>(processList, list);
+      switch (format) {
+        case .json:
+          throw UnimplementedError();
+        case .vtt:
+          return compute<List, String>(SubtitleUtils.json2Vtt, list);
+        case .srt:
+          return compute<List, String>(SubtitleUtils.json2Srt, list);
+      }
     }
     return null;
   }
